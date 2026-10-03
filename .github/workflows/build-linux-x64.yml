@@ -1,0 +1,64 @@
+name: Build Linux x64 Binary
+
+# Minimal single-target build for self-hosting forks: cross-compiles the
+# linux-x64 single-file executable on a GitHub-hosted ubuntu runner and uploads
+# it as the `binary-linux-x64` artifact. The upstream `build-binary.yml` covers
+# all six targets plus the per-platform smoke matrix, but it pins Blacksmith
+# runner labels that queue forever on forks without a Blacksmith account, so a
+# fork that only needs a deployable linux-x64 binary dispatches this instead.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # This project runs TypeScript directly with `node` (native type stripping),
+  # which needs Node >= 22.18; see the upstream build-binary workflow.
+  NODE_VERSION: "24"
+
+jobs:
+  build:
+    name: Build linux-x64
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # Pinned to the same immutable SHA as the upstream workflow: the Bun
+      # version comes from .bun-version, which the build script enforces.
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Cache Bun cross-compile runtimes
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache/bun-*-v*
+          key: bun-runtimes-${{ runner.os }}-${{ hashFiles('.bun-version') }}
+
+      # Runs postinstall codegen (provider registry + catalog).
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build linux-x64 binary
+        run: npm run build:binary -- linux-x64
+
+      - name: Upload linux-x64
+        uses: actions/upload-artifact@v7
+        with:
+          name: binary-linux-x64
+          path: dist/open-connector-linux-x64
+          if-no-files-found: error
+          retention-days: 7
