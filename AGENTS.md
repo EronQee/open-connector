@@ -95,3 +95,7 @@ The committed numbers are the copies that exist today, frozen as accepted debt; 
 - Run `npm run build` only when you need a separate no-fix typecheck, for example after generated files changed or for CI parity.
 - Run `npm run generate:catalog` when provider definitions or actions change.
 - Run provider examples manually when the task changes user-facing example behavior.
+
+## Local Deployment (this clone only)
+
+This clone deploys custom relay providers to a live nibrun instance through a fork-based build pipeline. Before touching `src/providers/openai_compatible/`, `src/providers/openai_video/`, or deploying, read `docs/self-hosting-relay.md` for the full runbook: fork remote and branch, the `build-linux-x64.yml` dispatch chain, the WSL-hosted `nib` CLI, the live app identity, and the Windows-only test/config quirks (`core.autocrlf=false`, the clone-baseline test failing locally on pristine upstream code).
