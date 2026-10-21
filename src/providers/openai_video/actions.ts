@@ -85,14 +85,18 @@ const getVideoAction = defineProviderAction(service, {
       download: s.boolean(
         "Whether to transfer the completed video into the connector's transit file storage. Leave off to fetch videoUrl from your own environment; only turn this on when the relay's download URL requires the API key or expires too quickly.",
       ),
+      queryPath: s.string(
+        "The query path relative to the connection base URL, without the task id. Defaults to probing the protocol path and the general task routes in order.",
+      ),
     },
-    { optional: ["taskId", "download"] },
+    { optional: ["taskId", "download", "queryPath"] },
   ),
   outputSchema: s.object(
     "The normalized task status output.",
     {
       taskId: s.string("The task identifier polled."),
       ...videoTaskFields,
+      queryPath: s.string("The query path that answered for this task."),
       file: s.nullable(videoFileSchema),
       raw: s.looseObject("The raw task status response payload."),
     },

@@ -64,6 +64,36 @@ const optionalImageRequestFields = [
   "watermark",
 ];
 
+const extraBodyField = s.record(
+  "Relay-specific fields merged into the request body verbatim, overriding the generated ones. Use this for fields the connector does not model, such as extra_body, resolution, or official_fallback.",
+  s.unknown("Any JSON value the relay accepts."),
+);
+
+const imageTaskErrorSchema = s.object(
+  "The error the relay reported for the task.",
+  {
+    code: s.nullableString("The upstream error code, when returned."),
+    message: s.nullableString("The upstream error message, when returned."),
+  },
+  { optional: ["code", "message"] },
+);
+
+const imageTaskFields = {
+  taskId: s.nullableString("The task identifier to poll with get_image_task."),
+  status: s.nullableString("The task status verbatim as the relay returned it."),
+  state: s.stringEnum(["queued", "in_progress", "completed", "failed", "unknown"], {
+    description:
+      "The task status normalized across relay protocols. Relays answer failures with HTTP 200, so poll this field rather than the HTTP status.",
+  }),
+  progress: s.nullableNumber(
+    "The task progress as reported by the relay: a fraction or a percentage depending on the relay.",
+  ),
+  images: s.array("The images the task has produced so far.", imageItemSchema),
+  error: s.nullable(imageTaskErrorSchema),
+};
+
+const optionalImageTaskFields = ["taskId", "status", "state", "progress", "images", "error"];
+
 const listModelsAction = defineProviderAction(service, {
   name: "list_models",
   operationType: "read",
@@ -159,8 +189,9 @@ const createImageAction = defineProviderAction(service, {
       model: s.string("The image model to use, such as gpt-image-1 or a relay-specific model id."),
       prompt: s.string("The prompt describing the image to generate."),
       ...imageRequestFields,
+      extraBody: extraBodyField,
     },
-    { optional: optionalImageRequestFields },
+    { optional: [...optionalImageRequestFields, "extraBody"] },
   ),
   outputSchema: imageResponseSchema,
 });
@@ -169,7 +200,7 @@ const editImageAction = defineProviderAction(service, {
   name: "edit_image",
   operationType: "write",
   description:
-    "Edit existing images with a relay image model using the OpenAI images edits protocol. Reference images are sent as base64 data or public HTTPS URLs in the JSON body.",
+    "Edit existing images with a relay image model using the OpenAI images edits protocol. The request is sent as multipart form data with the reference images as parts, falling back to a JSON body with inline images when the relay only parses JSON.",
   inputSchema: s.object(
     "The input payload for editing images.",
     {
@@ -187,10 +218,66 @@ const editImageAction = defineProviderAction(service, {
       ),
       mask: s.string("An optional mask image as base64 data or a public HTTPS URL marking the area to edit."),
       ...imageRequestFields,
+      extraBody: extraBodyField,
     },
-    { optional: ["mask", ...optionalImageRequestFields] },
+    { optional: ["mask", ...optionalImageRequestFields, "extraBody"] },
   ),
   outputSchema: imageResponseSchema,
+});
+
+const submitImageTaskAction = defineProviderAction(service, {
+  name: "submit_image_task",
+  operationType: "write",
+  description:
+    "Submit an asynchronous image generation task to a relay that only exposes the async image route. Poll get_image_task with the returned taskId until state is completed.",
+  inputSchema: s.object(
+    "The input payload for submitting an asynchronous image generation task.",
+    {
+      model: s.string("The image model to use, as listed by the relay."),
+      prompt: s.string("The prompt describing the image to generate."),
+      ...imageRequestFields,
+      submitPath: s.string(
+        "The submit path relative to the connection base URL. Defaults to images/generations/async; set it when the relay documents a different async route.",
+      ),
+      extraBody: extraBodyField,
+    },
+    { optional: [...optionalImageRequestFields, "submitPath", "extraBody"] },
+  ),
+  outputSchema: s.object(
+    "The normalized image task submission output.",
+    {
+      ...imageTaskFields,
+      submitPath: s.string("The submit path that was used."),
+      raw: s.looseObject("The raw task submission response payload."),
+    },
+    { optional: optionalImageTaskFields },
+  ),
+});
+
+const getImageTaskAction = defineProviderAction(service, {
+  name: "get_image_task",
+  operationType: "read",
+  description:
+    "Query the status of a relay image generation task. Relays report failures with HTTP 200, so branch on state, not on the call succeeding.",
+  inputSchema: s.object(
+    "The input payload for querying an image generation task.",
+    {
+      taskId: s.string("The task identifier returned by submit_image_task."),
+      queryPath: s.string(
+        "The query path relative to the connection base URL, without the task id. Defaults to probing tasks, images/tasks, and images/generations in order.",
+      ),
+    },
+    { optional: ["queryPath"] },
+  ),
+  outputSchema: s.object(
+    "The normalized image task status output.",
+    {
+      ...imageTaskFields,
+      queryPath: s.string("The query path that answered for this task."),
+      raw: s.looseObject("The raw task status response payload."),
+    },
+    { optional: optionalImageTaskFields },
+  ),
 });
 
 export const openAiCompatibleActions: ActionDefinition[] = [
@@ -199,4 +286,6 @@ export const openAiCompatibleActions: ActionDefinition[] = [
   createResponseAction,
   createImageAction,
   editImageAction,
+  submitImageTaskAction,
+  getImageTaskAction,
 ];

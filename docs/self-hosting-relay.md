@@ -5,6 +5,17 @@ This clone is a working copy of the fork `EronQee/open-connector`, branch `relay
 - `src/providers/openai_compatible/` — text (`chat/completions`, Responses API) and image generation/editing against a user-configured base URL. Covers lens (`https://lensapi.cn`), magic666 (`https://magic666.top`), qiuqiutoken (`https://api.qiuqiutoken.net/v1`), and any future OpenAI-shaped relay. A bare-host base URL gets `/v1` appended automatically.
 - `src/providers/openai_video/` — asynchronous video generation tasks. Connection field `protocol` selects the task protocol: `openai` (default, `POST /v1/videos`, used by lens, magic666 MiniMax, qiuqiutoken Sora) or `seedance` (`POST /v1/video/generations`, Doubao Seedance relays). Protocol-specific request fields (MiniMax `content[]`, Seedance `metadata`, watermark flags) go through the documented `extraBody` passthrough.
 
+Relay quirks the two providers normalize instead of exposing to callers:
+
+| Concern | Behavior |
+|---|---|
+| Async image | `submit_image_task` posts `images/generations/async` (override with `submitPath`) and `get_image_task` probes `tasks`, `images/tasks`, then `images/generations` for the task record (override with `queryPath`). |
+| Video task record | `get_video` probes the protocol path, the other protocol path, then `tasks` (override with `queryPath`). |
+| Image edits | `edit_image` sends multipart first, the documented OpenAI shape; a 404/405/415 or a body that names multipart falls back to a JSON body with inline base64 images. |
+| Task state | Both provider families normalize status words (10+ per state) and also treat "images/video URL present, no failing status" as completed, because relays answer failures with HTTP 200 and some omit the status entirely. |
+| Image response shape | `{data:[{url}]}`, `{data:{result:{images}}}`, Gemini `candidates[].content.parts[].inlineData`, Markdown data URLs, and `image_generation_call` items all normalize into `images[]`. |
+| Unmodeled fields | `create_image`, `edit_image`, and `submit_image_task` take `extraBody`, merged into the request body verbatim — same semantics as the video provider. |
+
 Video bytes do NOT flow through the gateway by default: `get_video` returns the relay's `videoUrl` and the caller downloads the file to its own storage. The opt-in `download: true` input transfers the file into the connector's transit-file storage, only for relays whose download URL requires the API key or expires quickly.
 
 ## Deploy chain (every provider change)
@@ -34,7 +45,7 @@ wsl -e sh -c 'cp /mnt/d/Tools/open-connector/dist-deploy/open-connector-linux-x6
 - The fork's default branch is `relay-providers` (changed from `main` so `build-linux-x64.yml` is workflow_dispatch-able; GitHub requires the workflow file on the default branch). The upstream `build-binary.yml` pins Blacksmith runner labels that queue forever on a fork without a Blacksmith account — do not dispatch it, use `build-linux-x64.yml`.
 - Local git config `core.autocrlf=false` was set deliberately. With the Windows default `true`, `oxfmt` rewrites line endings across the whole tree and marks ~7000 files as modified. Do not re-enable it.
 - `npx vitest run src/providers/provider-source-guards.clone-baseline.test.ts` fails on this Windows checkout even on pristine upstream code (path-separator/EOL sensitivity in the test itself); Linux CI is unaffected. Treat its output here as noise.
-- New provider code must pass the shared-owners rules in AGENTS.md above; the two providers reuse `requiredInputString` / `requiredResponseRecord` / `optionalStringArray` / `runProviderRequest` / `assertPublicHttpUrl` from the shared runtime instead of local copies, and `openai_video` imports the base-URL normalizer from `openai_compatible/runtime.ts` (sibling import, one owner).
+- New provider code must pass the shared-owners rules in AGENTS.md above; the two providers reuse `requiredInputString` / `requiredResponseRecord` / `optionalStringArray` / `runProviderRequest` / `assertPublicHttpUrl` / `base64Bytes` from the shared runtime instead of local copies, and `openai_video` imports the base-URL normalizer from `openai_compatible/runtime.ts` (sibling import, one owner).
 
 ## Verify a deploy
 

@@ -24,9 +24,51 @@ const videoDownloadTimeoutMs = 600_000;
 const openaiProtocolTaskPath = "videos";
 const seedanceProtocolTaskPath = "video/generations";
 
-const videoStatusInProgress = new Set(["pending", "running", "processing", "in_progress", "generating"]);
-const videoStatusCompleted = new Set(["succeeded", "success", "completed", "finish", "finished", "done"]);
-const videoStatusFailed = new Set(["failed", "fail", "error", "cancelled", "canceled", "expired", "deleted"]);
+/**
+ * Relays that share a submit route still disagree on where the task record
+ * lives. A poll is idempotent and a routing 404 says nothing about the task,
+ * so the query tries the protocol path first and then the general task routes
+ * before reporting failure.
+ */
+const openaiProtocolTaskQueryPaths = ["videos", "video/generations", "tasks", "videos/generations"];
+const seedanceProtocolTaskQueryPaths = ["video/generations", "videos", "tasks", "videos/generations"];
+
+const videoStatusInProgress = new Set([
+  "pending",
+  "running",
+  "processing",
+  "in_progress",
+  "in-progress",
+  "generating",
+  "submitted",
+  "created",
+]);
+const videoStatusCompleted = new Set([
+  "succeeded",
+  "success",
+  "successful",
+  "completed",
+  "complete",
+  "finish",
+  "finished",
+  "done",
+  "ok",
+  "ready",
+]);
+const videoStatusFailed = new Set([
+  "failed",
+  "failure",
+  "fail",
+  "error",
+  "errored",
+  "cancelled",
+  "canceled",
+  "timeout",
+  "timedout",
+  "rejected",
+  "expired",
+  "deleted",
+]);
 
 export type OpenAiVideoProtocol = "openai" | "seedance";
 export type NormalizedVideoState = "queued" | "in_progress" | "completed" | "failed" | "unknown";
@@ -136,20 +178,52 @@ async function createVideo(input: Record<string, unknown>, context: OpenAiVideoA
 
 async function getVideo(input: Record<string, unknown>, context: OpenAiVideoActionContext): Promise<unknown> {
   const taskId = requiredInputString(input.taskId, "taskId");
-  const payload = await requestOpenAiVideoJson({
-    context,
-    method: "GET",
-    path: `${readTaskPath(context.protocol)}/${encodePathSegment(taskId)}`,
-  });
+  const { payload, queryPath } = await readVideoTaskPayload(taskId, input.queryPath, context);
   const task = normalizeVideoTask(payload, "video task response");
   const file = input.download === true ? await downloadVideoToTransitFile(task, context) : null;
 
   return {
     ...task,
     taskId: task.taskId ?? taskId,
+    queryPath,
     file,
     raw: payload,
   };
+}
+
+/**
+ * Query the task record across the paths relays put it under. A 404 means that
+ * path is not this relay's route, so the next candidate is tried; every other
+ * failure is the relay answering about the task and is reported as-is.
+ */
+async function readVideoTaskPayload(
+  taskId: string,
+  rawQueryPath: unknown,
+  context: OpenAiVideoActionContext,
+): Promise<{ payload: Record<string, unknown>; queryPath: string }> {
+  const overridden = optionalString(rawQueryPath);
+  const candidates = overridden ? [overridden] : readTaskQueryPaths(context.protocol);
+  let lastNotFound: ProviderRequestError | undefined;
+
+  for (const candidate of candidates) {
+    const queryPath = `${candidate.replace(/\/+$/, "")}/${encodePathSegment(taskId)}`;
+    try {
+      const payload = await requestOpenAiVideoJson({
+        context,
+        method: "GET",
+        path: queryPath,
+      });
+      return { payload, queryPath };
+    } catch (error) {
+      if (error instanceof ProviderRequestError && error.status === 404) {
+        lastNotFound = error;
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  throw lastNotFound ?? new ProviderRequestError(502, "No video task query path answered for this relay.");
 }
 
 /**
@@ -194,14 +268,29 @@ function buildCreateVideoBody(input: Record<string, unknown>, protocol: OpenAiVi
 }
 
 function normalizeVideoTask(payload: Record<string, unknown>, source: string): NormalizedVideoTask {
-  const task = optionalRecord(payload.task) ?? optionalRecord(payload.data) ?? payload;
-  const status = optionalString(task.status) ?? optionalString(payload.status) ?? null;
+  const task =
+    optionalRecord(payload.task) ??
+    optionalRecord(payload.data) ??
+    optionalRecord(optionalRecord(payload.data)?.task) ??
+    optionalRecord(payload.detail) ??
+    payload;
+  const status =
+    optionalString(task.status) ?? optionalString(task.task_status) ?? optionalString(payload.status) ?? null;
+  const videoUrl = readVideoUrl(payload, task);
   const normalized: NormalizedVideoTask = {
-    taskId: optionalString(task.id) ?? optionalString(task.task_id) ?? optionalString(payload.id) ?? null,
+    taskId:
+      optionalString(task.id) ??
+      optionalString(task.task_id) ??
+      optionalString(task.taskId) ??
+      optionalString(payload.id) ??
+      optionalString(payload.task_id) ??
+      null,
     status,
-    state: normalizeVideoStatus(status ?? undefined),
+    // A relay that already handed back a playable URL has finished even when
+    // its status field is missing or non-standard.
+    state: normalizeVideoStatus(status ?? undefined, videoUrl !== null),
     progress: optionalNumber(task.progress) ?? optionalNumber(payload.progress) ?? null,
-    videoUrl: readVideoUrl(payload, task),
+    videoUrl,
     error: readVideoError(task.error) ?? readVideoError(payload.error),
   };
   if (!normalized.taskId && normalized.state === "unknown") {
@@ -217,6 +306,7 @@ function normalizeVideoTask(payload: Record<string, unknown>, source: string): N
  * record.
  */
 function readVideoUrl(payload: Record<string, unknown>, task: Record<string, unknown>): string | null {
+  const data = optionalRecord(payload.data);
   const candidates = [
     optionalString(payload.download_url),
     optionalString(task.download_url),
@@ -228,9 +318,42 @@ function readVideoUrl(payload: Record<string, unknown>, task: Record<string, unk
     optionalString(payload.url),
     optionalString(task.url),
     optionalString(task.result_url),
-    optionalString(optionalRecord(payload.data)?.result_url),
+    optionalString(data?.result_url),
+    optionalString(data?.video_url),
+    optionalString(data?.url),
+    optionalString(optionalRecord(data?.content)?.url),
+    optionalString(optionalRecord(optionalRecord(data?.result)?.content)?.url),
+    firstVideoUrl(optionalRecord(task.result)),
+    firstVideoUrl(optionalRecord(data?.result)),
   ];
   return candidates.find((candidate): candidate is string => Boolean(candidate)) ?? null;
+}
+
+/**
+ * Some relays answer with `result.videos[]` or `result.outputs[]` instead of a
+ * single URL field.
+ */
+function firstVideoUrl(result: Record<string, unknown> | undefined): string | undefined {
+  if (!result) {
+    return undefined;
+  }
+  for (const key of ["videos", "outputs", "results", "content"]) {
+    const value = result[key];
+    const first = Array.isArray(value) ? value.at(0) : value;
+    const direct = optionalString(first);
+    if (direct) {
+      return direct;
+    }
+    const record = optionalRecord(first);
+    const nested =
+      optionalString(record?.url) ??
+      optionalString(record?.video_url) ??
+      optionalString(optionalRecord(record?.content)?.url);
+    if (nested) {
+      return nested;
+    }
+  }
+  return undefined;
 }
 
 function readVideoError(value: unknown): NormalizedVideoError | null {
@@ -246,22 +369,22 @@ function readVideoError(value: unknown): NormalizedVideoError | null {
   return { code: code ?? null, message: message ?? null };
 }
 
-function normalizeVideoStatus(status: string | undefined): NormalizedVideoState {
-  if (!status) {
-    return "unknown";
+function normalizeVideoStatus(status: string | undefined, hasVideoUrl = false): NormalizedVideoState {
+  const key = status?.trim().toLowerCase() ?? "";
+  if (key && videoStatusFailed.has(key)) {
+    return "failed";
   }
-  const key = status.toLowerCase();
+  if (key && videoStatusCompleted.has(key)) {
+    return "completed";
+  }
+  if (!key) {
+    return hasVideoUrl ? "completed" : "unknown";
+  }
   if (key === "queued") {
     return "queued";
   }
   if (videoStatusInProgress.has(key)) {
     return "in_progress";
-  }
-  if (videoStatusCompleted.has(key)) {
-    return "completed";
-  }
-  if (videoStatusFailed.has(key)) {
-    return "failed";
   }
   return "unknown";
 }
@@ -363,6 +486,10 @@ function readProtocol(value: unknown): OpenAiVideoProtocol {
 
 function readTaskPath(protocol: OpenAiVideoProtocol): string {
   return protocol === "seedance" ? seedanceProtocolTaskPath : openaiProtocolTaskPath;
+}
+
+function readTaskQueryPaths(protocol: OpenAiVideoProtocol): string[] {
+  return protocol === "seedance" ? seedanceProtocolTaskQueryPaths : openaiProtocolTaskQueryPaths;
 }
 
 async function requestOpenAiVideoJson(input: {
