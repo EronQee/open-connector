@@ -638,6 +638,8 @@
         "connectionsTitle": "连接访问",
         "connectionsUnrestrictedHint": "此 Token 可以使用任何已存储的连接；请求未指定名称时使用 default。",
         "connectionsRestrictedHint": "此 Token 只能使用下方选中的 Provider 连接。",
+        "credentialExportsTitle": "凭证导出",
+        "credentialExportsHint": "允许此 Token 读取所选 Provider 的凭证，让可信的本地调用方自行发送请求。Connector 不转发任何请求或媒体内容。代理授权不包含此项。",
         "connectionsList": "允许的连接",
         "connectionsRequired": "请至少选择一个连接，或选择不额外限制。",
         "tooManyConnections": "连接列表最多包含 128 个连接。",

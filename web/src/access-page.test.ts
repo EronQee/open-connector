@@ -9,6 +9,7 @@ import {
   ConnectionGrantEditor,
   connectionGrantOptions,
   createConnectionGrantDraft,
+  credentialExportOptions,
   policyDraftFromRules,
   policyRulesFromDraft,
   runtimeTokenPolicyBody,
@@ -137,6 +138,7 @@ describe("AccessPage", () => {
       blockedActions: [],
       allowedProxies: [],
       allowedConnections: [],
+      allowedCredentialExports: [],
     });
   });
 
@@ -156,6 +158,7 @@ describe("AccessPage", () => {
       blockedActions: [],
       allowedProxies: ["github"],
       allowedConnections: [githubWorkId],
+      allowedCredentialExports: [],
     });
   });
 
@@ -170,6 +173,24 @@ describe("AccessPage", () => {
       allowedTriggers: ["github.on_repo_event"],
       allowedConnections: [githubWorkId],
     });
+  });
+
+  it("carries credential export grants into the token policy body", () => {
+    expect(
+      runtimeTokenPolicyBody(
+        { allowedActions: [], blockedActions: [], allowedProxies: [] },
+        { mode: "unrestricted", ids: [] },
+        ["openai_compatible"],
+      ),
+    ).toMatchObject({ allowedCredentialExports: ["openai_compatible"] });
+  });
+
+  it("offers credential export only for providers that declare it", () => {
+    const providers = [
+      { service: "openai_compatible", displayName: "Relay", credentialExport: true },
+      { service: "github", displayName: "GitHub" },
+    ] as ProviderDefinition[];
+    expect(credentialExportOptions(providers).map((provider) => provider.service)).toEqual(["openai_compatible"]);
   });
 
   it("builds one token grant option for each current credential connection", () => {

@@ -90,6 +90,8 @@ export interface ProviderDefinition {
   scenario?: ProviderScenario | "docs";
   authTypes: string[];
   auth: AuthDefinition[];
+  /** Providers that allow a runtime token to read their stored credential for direct use. */
+  credentialExport?: boolean;
   homepageUrl?: string;
   iconUrl?: string;
   actions: ActionDefinition[];
@@ -173,6 +175,7 @@ export interface RuntimeTokenSummary {
   allowedProxies: string[];
   allowedTriggers?: string[];
   allowedConnections: string[];
+  allowedCredentialExports?: string[];
   createdAt: string;
   lastUsedAt?: string;
 }

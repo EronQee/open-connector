@@ -638,6 +638,8 @@
         "connectionsTitle": "Connection アクセス",
         "connectionsUnrestrictedHint": "この token は保存済みの任意の connection を使用できます。リクエストで名前を省略した場合は default を使います。",
         "connectionsRestrictedHint": "この token は選択した Provider の connection だけを使用できます。",
+        "credentialExportsTitle": "Credential export",
+        "credentialExportsHint": "この token に選択した Provider の credential の読み取りを許可し、信頼できるローカル呼び出し元が直接リクエストを送れるようにします。Connector はリクエストやメディアのバイトを転送しません。proxy の許可には含まれません。",
         "connectionsList": "許可する connections",
         "connectionsRequired": "connection を少なくとも 1 つ選択するか、追加制限なしを選択してください。",
         "tooManyConnections": "connection リストには 128 個までしか含められません。",

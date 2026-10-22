@@ -638,6 +638,8 @@
         "connectionsTitle": "Accès aux connexions",
         "connectionsUnrestrictedHint": "Ce token peut utiliser n’importe quelle connexion enregistrée, y compris default lorsque la requête omet un nom.",
         "connectionsRestrictedHint": "Ce token ne peut utiliser que les connexions de fournisseur sélectionnées.",
+        "credentialExportsTitle": "Export de credentials",
+        "credentialExportsHint": "Autorise ce token à lire les credentials des providers sélectionnés afin qu’un appelant local de confiance envoie ses propres requêtes. Le connector ne transporte ni requête ni média. Une autorisation de proxy ne l’implique pas.",
         "connectionsList": "Connexions autorisées",
         "connectionsRequired": "Sélectionnez au moins une connexion, ou choisissez aucune restriction supplémentaire.",
         "tooManyConnections": "Une liste de connexions ne peut pas contenir plus de 128 connexions.",

@@ -638,6 +638,8 @@
         "connectionsTitle": "Доступ к connections",
         "connectionsUnrestrictedHint": "Этот token может использовать любое сохраненное connection, включая default, если в запросе нет имени.",
         "connectionsRestrictedHint": "Этот token может использовать только выбранные connections провайдеров.",
+        "credentialExportsTitle": "Экспорт credentials",
+        "credentialExportsHint": "Разрешает этому token читать credentials выбранных провайдеров, чтобы доверенный локальный вызывающий код отправлял запросы сам. Connector не передает запросы и медиаданные. Разрешение proxy это не включает.",
         "connectionsList": "Разрешенные connections",
         "connectionsRequired": "Выберите хотя бы одно connection или отсутствие дополнительных ограничений.",
         "tooManyConnections": "Список connections не может содержать больше 128 connections.",

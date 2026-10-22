@@ -84,9 +84,11 @@ interface CreateTokenDialogProps {
   connections: ConnectionGrantDraft;
   connectionOptions: ConnectionGrantOption[];
   providers: ProviderDefinition[];
+  credentialExports: string[];
   onNameChange(name: string): void;
   onDraftChange(draft: PolicyEditorDraft): void;
   onConnectionsChange(draft: ConnectionGrantDraft): void;
+  onCredentialExportsChange(services: string[]): void;
   onSubmit(event: SubmitEvent<HTMLFormElement>): Promise<void>;
   onCopy(token: string): void;
   onClose(): void;
@@ -108,10 +110,12 @@ export function AccessPage(props: AccessPageProps): ReactNode {
   const [name, setName] = useState("");
   const [createDraft, setCreateDraft] = useState(() => createPolicyEditorDraft(emptyPolicyRules()));
   const [createConnections, setCreateConnections] = useState(() => createConnectionGrantDraft());
+  const [createCredentialExports, setCreateCredentialExports] = useState<string[]>([]);
   const [created, setCreated] = useState<RuntimeTokenCreation | null>(null);
   const [editingToken, setEditingToken] = useState<RuntimeTokenSummary | null>(null);
   const [editTokenDraft, setEditTokenDraft] = useState(() => createPolicyEditorDraft(emptyPolicyRules()));
   const [editConnections, setEditConnections] = useState(() => createConnectionGrantDraft());
+  const [editCredentialExports, setEditCredentialExports] = useState<string[]>([]);
   const [policy, setPolicy] = useState(props.policy);
   const [runtimeDraft, setRuntimeDraft] = useState(() => createPolicyEditorDraft(props.policy.runtime));
   const [policyExpanded, setPolicyExpanded] = useState(true);
@@ -163,12 +167,13 @@ export function AccessPage(props: AccessPageProps): ReactNode {
     try {
       const result = await apiPost<RuntimeTokenCreation>("/api/runtime-tokens", {
         name,
-        ...runtimeTokenPolicyBody(rules, createConnections),
+        ...runtimeTokenPolicyBody(rules, createConnections, createCredentialExports),
       });
       setCreated(result);
       setName("");
       setCreateDraft(createPolicyEditorDraft(emptyPolicyRules()));
       setCreateConnections(createConnectionGrantDraft());
+      setCreateCredentialExports([]);
       setTokenStatus(t("access.created"));
       props.onRefresh();
     } catch (error) {
@@ -212,7 +217,10 @@ export function AccessPage(props: AccessPageProps): ReactNode {
     const rules = policyRulesFromEditorDraft(editTokenDraft);
     setTokenStatus(t("access.policy.saving"));
     try {
-      await apiPut(`/api/runtime-tokens/${editingToken.id}`, runtimeTokenPolicyBody(rules, editConnections));
+      await apiPut(
+        `/api/runtime-tokens/${editingToken.id}`,
+        runtimeTokenPolicyBody(rules, editConnections, editCredentialExports),
+      );
       setEditingToken(null);
       setTokenStatus(t("access.policy.saved"));
       props.onRefresh();
@@ -236,6 +244,7 @@ export function AccessPage(props: AccessPageProps): ReactNode {
     setName("");
     setCreateDraft(createPolicyEditorDraft(emptyPolicyRules()));
     setCreateConnections(createConnectionGrantDraft());
+    setCreateCredentialExports([]);
     setCreated(null);
     setTokenStatus(null);
     setCreateOpen(true);
@@ -246,6 +255,7 @@ export function AccessPage(props: AccessPageProps): ReactNode {
     setName("");
     setCreateDraft(createPolicyEditorDraft(emptyPolicyRules()));
     setCreateConnections(createConnectionGrantDraft());
+    setCreateCredentialExports([]);
     setCreated(null);
     setTokenStatus(null);
   }
@@ -263,6 +273,7 @@ export function AccessPage(props: AccessPageProps): ReactNode {
       }),
     );
     setEditConnections(createConnectionGrantDraft(token.allowedConnections ?? []));
+    setEditCredentialExports(token.allowedCredentialExports ?? []);
     setTokenStatus(null);
   }
 
@@ -407,9 +418,11 @@ export function AccessPage(props: AccessPageProps): ReactNode {
           connections={createConnections}
           connectionOptions={connectionOptions}
           providers={props.providers}
+          credentialExports={createCredentialExports}
           onNameChange={setName}
           onDraftChange={setCreateDraft}
           onConnectionsChange={setCreateConnections}
+          onCredentialExportsChange={setCreateCredentialExports}
           onSubmit={submitToken}
           onCopy={(token) => void copy(token)}
           onClose={closeCreate}
@@ -422,9 +435,11 @@ export function AccessPage(props: AccessPageProps): ReactNode {
           connections={editConnections}
           connectionOptions={connectionOptions}
           providers={props.providers}
+          credentialExports={editCredentialExports}
           status={tokenStatus}
           onDraftChange={setEditTokenDraft}
           onConnectionsChange={setEditConnections}
+          onCredentialExportsChange={setEditCredentialExports}
           onSubmit={saveTokenPolicy}
           onClose={() => setEditingToken(null)}
         />
@@ -847,6 +862,11 @@ function CreateTokenDialog(props: CreateTokenDialogProps): ReactNode {
                 connectionInvalid={connectionIssue != null}
                 onChange={props.onDraftChange}
               />
+              <CredentialExportEditor
+                services={props.credentialExports}
+                providers={props.providers}
+                onChange={props.onCredentialExportsChange}
+              />
               {props.status ? <FormStatus message={props.status} /> : null}
               <div className="token-dialog-actions">
                 <div className="button-row">
@@ -873,9 +893,11 @@ interface EditTokenPolicyDialogProps {
   connections: ConnectionGrantDraft;
   connectionOptions: ConnectionGrantOption[];
   providers: ProviderDefinition[];
+  credentialExports: string[];
   status: string | null;
   onDraftChange(draft: PolicyEditorDraft): void;
   onConnectionsChange(draft: ConnectionGrantDraft): void;
+  onCredentialExportsChange(services: string[]): void;
   onSubmit(event: SubmitEvent<HTMLFormElement>): Promise<void>;
   onClose(): void;
 }
@@ -915,6 +937,11 @@ function EditTokenPolicyDialog(props: EditTokenPolicyDialogProps): ReactNode {
               }
               connectionInvalid={connectionIssue != null}
               onChange={props.onDraftChange}
+            />
+            <CredentialExportEditor
+              services={props.credentialExports}
+              providers={props.providers}
+              onChange={props.onCredentialExportsChange}
             />
             {props.status ? <FormStatus message={props.status} /> : null}
             <div className="token-dialog-actions">
@@ -1036,12 +1063,14 @@ export function allowedConnectionsFromDraft(draft: ConnectionGrantDraft): string
 export function runtimeTokenPolicyBody(
   rules: Pick<PolicyRules, "allowedActions" | "blockedActions" | "allowedProxies" | "allowedTriggers">,
   connections: ConnectionGrantDraft,
+  credentialExports: string[] = [],
 ): {
   allowedActions: string[];
   blockedActions: string[];
   allowedProxies: string[];
   allowedConnections: string[];
   allowedTriggers: string[];
+  allowedCredentialExports: string[];
 } {
   return {
     allowedActions: rules.allowedActions,
@@ -1049,6 +1078,7 @@ export function runtimeTokenPolicyBody(
     allowedProxies: rules.allowedProxies,
     allowedConnections: allowedConnectionsFromDraft(connections),
     allowedTriggers: rules.allowedTriggers ?? [],
+    allowedCredentialExports: credentialExports,
   };
 }
 
@@ -1186,5 +1216,64 @@ export function ConnectionGrantEditor(props: ConnectionGrantEditorProps): ReactN
         </section>
       ) : null}
     </div>
+  );
+}
+
+interface CredentialExportEditorProps {
+  services: string[];
+  providers: ProviderDefinition[];
+  onChange(services: string[]): void;
+}
+
+/**
+ * Offer only the providers whose credential can leave the runtime, so the list never advertises an
+ * export the backend would refuse.
+ */
+export function credentialExportOptions(providers: ProviderDefinition[]): ProviderDefinition[] {
+  return providers.filter((provider) => provider.credentialExport === true);
+}
+
+export function CredentialExportEditor(props: CredentialExportEditorProps): ReactNode {
+  const t = useTranslate();
+  const options = credentialExportOptions(props.providers);
+  if (options.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="policy-rule-section">
+      <div className="policy-rule-heading">
+        <div>
+          <h4>{t("access.policy.editor.credentialExportsTitle")}</h4>
+        </div>
+      </div>
+      <p>{t("access.policy.editor.credentialExportsHint")}</p>
+      <div className="connection-grant-list">
+        {options.map((provider, index) => {
+          const checked = props.services.includes(provider.service);
+          return (
+            <label className="connection-grant-option" htmlFor={`credential-export-${index}`} key={provider.service}>
+              <input
+                id={`credential-export-${index}`}
+                type="checkbox"
+                value={provider.service}
+                checked={checked}
+                onChange={(event) =>
+                  props.onChange(
+                    event.target.checked
+                      ? [...props.services, provider.service]
+                      : props.services.filter((service) => service !== provider.service),
+                  )
+                }
+              />
+              <span>
+                <code>{provider.displayName}</code>
+                <small>{provider.service}</small>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </section>
   );
 }

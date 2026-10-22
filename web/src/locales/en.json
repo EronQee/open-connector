@@ -638,6 +638,8 @@
         "connectionsTitle": "Connection access",
         "connectionsUnrestrictedHint": "This token can use any stored connection, including default when the request omits a name.",
         "connectionsRestrictedHint": "This token can use only the selected provider connections.",
+        "credentialExportsTitle": "Credential export",
+        "credentialExportsHint": "Allow this token to read the selected provider credentials so a trusted local caller can send requests directly. The connector returns no request or media bytes. A proxy grant does not imply this.",
         "connectionsList": "Allowed connections",
         "connectionsRequired": "Select at least one connection, or choose no additional restriction.",
         "tooManyConnections": "A connection list cannot contain more than 128 connections.",
