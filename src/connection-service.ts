@@ -317,6 +317,49 @@ export class ConnectionService {
     };
   }
 
+  /**
+   * Read one stored credential for use outside the runtime.
+   *
+   * This is the only path that hands credential values to a caller, so it refuses SaaS connections
+   * and OAuth tokens whose refresh lifecycle only the runtime can manage. The route that calls it
+   * owns the export authorization and the provider's `credentialExport` opt-in.
+   */
+  async getExportableCredential(
+    service: string,
+    connectionName?: string,
+    connectionId?: string,
+  ): Promise<Extract<ResolvedCredential, { authType: "api_key" | "custom_credential" }>> {
+    const provider = this.getProvider(service);
+    if (provider.credentialExport !== true) {
+      throw new ConnectionError("credential_export_not_supported", `${service} does not allow credential export.`);
+    }
+
+    const stored = await this.selectStoredConnection(service, connectionName, connectionId);
+    if (stored?.source === "saas") {
+      throw new ConnectionError("unsupported_auth_type", "SaaS credentials are not available locally.");
+    }
+
+    const credential =
+      stored?.credential ?? (this.supportsAuth(provider, "no_auth") ? { authType: "no_auth" } : undefined);
+    if (!credential) {
+      throw new ConnectionError(
+        "connection_not_found",
+        `${service} connection not found: ${normalizeConnectionName(connectionName)}.`,
+      );
+    }
+    if (credential.authType === "no_auth") {
+      throw new ConnectionError("credential_export_not_supported", `${service} has no credential to export.`);
+    }
+    if (credential.authType === "oauth2") {
+      throw new ConnectionError(
+        "unsupported_auth_type",
+        "OAuth credentials are managed by the runtime and cannot be exported.",
+      );
+    }
+
+    return credential;
+  }
+
   async getCredential(service: string, connectionName?: string): Promise<ResolvedCredential | undefined> {
     const provider = this.getProvider(service);
     const name = normalizeConnectionName(connectionName);

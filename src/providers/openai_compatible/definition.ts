@@ -14,6 +14,11 @@ export const provider: ProviderDefinition = {
   displayName: "OpenAI-Compatible Relay",
   categories: ["AI", "Developer Tools"],
   authTypes: ["custom_credential"],
+  /**
+   * The credential is a base URL plus an API key for an OpenAI-protocol relay, so a local agent can
+   * call the relay directly instead of streaming generated media back through the connector.
+   */
+  credentialExport: true,
   auth: [
     {
       type: "custom_credential",

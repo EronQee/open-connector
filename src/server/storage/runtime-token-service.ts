@@ -11,6 +11,8 @@ export interface RuntimeTokenRecord {
   blockedActions: string[];
   allowedProxies: string[];
   allowedConnections: string[];
+  /** Provider services whose stored credential this token may read. Absent in pre-migration rows. */
+  allowedCredentialExports?: string[];
   allowedTriggers?: string[];
   createdAt: string;
   lastUsedAt?: string;
@@ -23,6 +25,7 @@ export interface RuntimeTokenSummary {
   blockedActions: string[];
   allowedProxies: string[];
   allowedConnections: string[];
+  allowedCredentialExports: string[];
   allowedTriggers?: string[];
   createdAt: string;
   lastUsedAt?: string;
@@ -64,6 +67,7 @@ export class RuntimeTokenService {
       blockedActions: [],
       allowedProxies: [],
       allowedConnections: [],
+      allowedCredentialExports: [],
     },
   ): Promise<RuntimeTokenCreation> {
     const token = `${tokenPrefix}${randomBytes(32).toString("base64url")}`;
@@ -76,6 +80,7 @@ export class RuntimeTokenService {
       blockedActions: policy.blockedActions,
       allowedProxies: policy.allowedProxies,
       allowedConnections: policy.allowedConnections ?? [],
+      allowedCredentialExports: policy.allowedCredentialExports ?? [],
       allowedTriggers: policy.allowedTriggers ?? [],
       createdAt: now,
     };
@@ -92,7 +97,16 @@ export class RuntimeTokenService {
   }
 
   async updateTokenPolicy(id: string, policy: TokenPolicy): Promise<RuntimeTokenSummary | undefined> {
-    const record = await this.store.updatePolicy(id, policy);
+    // Omission keeps an existing export grant: older clients do not know the field, and a PUT that
+    // never mentioned it must not silently revoke it. Explicit `[]` still clears it.
+    const existing =
+      policy.allowedCredentialExports === undefined
+        ? (await this.store.list()).find((record) => record.id === id)
+        : undefined;
+    const record = await this.store.updatePolicy(id, {
+      ...policy,
+      allowedCredentialExports: policy.allowedCredentialExports ?? existing?.allowedCredentialExports ?? [],
+    });
     return record ? summarizeRuntimeToken(record) : undefined;
   }
 
@@ -113,6 +127,7 @@ export class RuntimeTokenService {
       blockedActions: matched.blockedActions,
       allowedProxies: matched.allowedProxies,
       allowedConnections: matched.allowedConnections ?? [],
+      allowedCredentialExports: matched.allowedCredentialExports ?? [],
       allowedTriggers: matched.allowedTriggers ?? [],
     };
   }
@@ -146,6 +161,7 @@ export function summarizeRuntimeToken(record: RuntimeTokenRecord): RuntimeTokenS
     blockedActions: record.blockedActions,
     allowedProxies: record.allowedProxies,
     allowedConnections: record.allowedConnections,
+    allowedCredentialExports: record.allowedCredentialExports ?? [],
     allowedTriggers: record.allowedTriggers ?? [],
     createdAt: record.createdAt,
     lastUsedAt: record.lastUsedAt,

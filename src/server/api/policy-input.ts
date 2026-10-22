@@ -27,13 +27,19 @@ export function readTokenPolicy(body: JsonRequestBody, allowOmitted = false): To
   if (body.blockedProxies !== undefined) {
     throw invalidInput("Token policy does not support proxy block rules.");
   }
-  return {
+  const policy: TokenPolicy = {
     allowedActions: readRules(body.allowedActions, "allowedActions", "action", allowOmitted),
     blockedActions: readRules(body.blockedActions, "blockedActions", "action", allowOmitted),
     allowedProxies: readRules(body.allowedProxies, "allowedProxies", "proxy", allowOmitted),
     allowedTriggers: readRules(body.allowedTriggers, "allowedTriggers", "action", true),
     allowedConnections: readConnectionIds(body.allowedConnections, "allowedConnections", allowOmitted),
   };
+  // Absent keeps an existing grant on update so older clients, which never send this field, cannot
+  // clear it by omitting it. An explicit empty array still revokes it.
+  if (body.allowedCredentialExports !== undefined) {
+    policy.allowedCredentialExports = readRules(body.allowedCredentialExports, "allowedCredentialExports", "proxy");
+  }
+  return policy;
 }
 
 function readRules(value: unknown, fieldName: string, kind: "action" | "proxy", allowOmitted = false): string[] {

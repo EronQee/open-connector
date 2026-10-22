@@ -309,6 +309,40 @@ Rejected project keys use `oauth_source_unauthorized`; incompatible responses us
 HTTP 429 preserves a valid `Retry-After`, including when replaying a stored idempotent action result.
 
 Timeouts, lost responses and cancellations never automatically replay action or proxy POSTs.
+
+### Credential export
+
+`GET /v1/credentials/:service` returns one stored credential so a trusted local caller can send
+requests to the provider itself. This is the opposite trade-off from `/v1/proxy`: the proxy keeps the
+credential server-side and carries response bytes back through the connector, while this endpoint
+carries no request or media content at all. Use it when generated media should be received directly
+by the caller instead of being buffered by the connector.
+
+Two independent conditions must hold:
+
+- The provider declares `credentialExport: true`. Today only `openai_compatible` does, since its
+  credential is a base URL plus an API key for an OpenAI-protocol relay.
+- The persistent runtime token grants the service in `allowedCredentialExports`. That list is empty
+  by default, and a proxy grant does not imply it. Bootstrap runtime tokens and JWTs have no stored
+  grant and are therefore refused.
+
+The selected connection is resolved with the usual alias and `x-oo-connector-app-id` rules, and a
+non-empty token `allowedConnections` list is enforced. Only `api_key` and `custom_credential`
+connections are returned; OAuth and SaaS credentials stay inside the runtime, as do `no_auth`
+connections with nothing to export.
+
+```bash
+curl -s -X POST http://localhost:3000/api/runtime-tokens \
+  -H 'content-type: application/json' \
+  -d '{"name":"local-agent","allowedActions":[],"blockedActions":[],"allowedProxies":[],"allowedCredentialExports":["openai_compatible"]}'
+
+curl -s http://localhost:3000/v1/credentials/openai_compatible \
+  -H "authorization: Bearer $RUNTIME_TOKEN"
+```
+
+The response `data` contains `service`, `connectionName`, `connectionId`, `authType` and the stored
+`values` (for the relay provider, `baseUrl` and `apiKey`). Responses are `no-store`. Treat the result
+as a secret: anyone holding it can call the relay directly.
 A cancelled call reports `execution_cancelled`, but SaaS or the provider may already have
 completed the operation. Local idempotency prevents repeat dispatch through its existing
 recorded request boundary; it does not guarantee exactly-once execution across the network.

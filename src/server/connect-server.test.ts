@@ -1960,6 +1960,77 @@ describe("ConnectServer", () => {
     });
   });
 
+  it("exports only an opt-in provider credential granted to the calling token", async () => {
+    const runtimeTokens = new RuntimeTokenService(new MemoryRuntimeTokenStore());
+    const exportableProvider: ProviderDefinition = { ...apiKeyProvider, credentialExport: true };
+    const app = createTestServer([exportableProvider], { runtimeTokens }).createApp();
+    await app.request("/api/connections/example", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ authType: "api_key", values: { apiKey: "relay-secret" } }),
+    });
+
+    const ungranted = await app.request("/api/runtime-tokens", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "No export", allowedActions: [], blockedActions: [], allowedProxies: [] }),
+    });
+    const ungrantedToken = ((await ungranted.json()) as { token: string }).token;
+    const denied = await app.request("/v1/credentials/example", {
+      headers: { authorization: `Bearer ${ungrantedToken}` },
+    });
+    expect(denied.status).toBe(403);
+    await expect(denied.json()).resolves.toMatchObject({ errorCode: "credential_export_not_allowed" });
+
+    const granted = await app.request("/api/runtime-tokens", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "Local agent",
+        allowedActions: [],
+        blockedActions: [],
+        allowedProxies: [],
+        allowedCredentialExports: ["example"],
+      }),
+    });
+    const grantedToken = ((await granted.json()) as { token: string }).token;
+    const exported = await app.request("/v1/credentials/example", {
+      headers: { authorization: `Bearer ${grantedToken}` },
+    });
+    expect(exported.status).toBe(200);
+    await expect(exported.json()).resolves.toMatchObject({
+      data: { service: "example", connectionName: "default", authType: "api_key", values: { apiKey: "relay-secret" } },
+    });
+  });
+
+  it("refuses to export a credential for a provider that did not opt in", async () => {
+    const runtimeTokens = new RuntimeTokenService(new MemoryRuntimeTokenStore());
+    const app = createTestServer([apiKeyProvider], { runtimeTokens }).createApp();
+    await app.request("/api/connections/example", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ authType: "api_key", values: { apiKey: "plain-secret" } }),
+    });
+    const created = await app.request("/api/runtime-tokens", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: "Local agent",
+        allowedActions: [],
+        blockedActions: [],
+        allowedProxies: [],
+        allowedCredentialExports: ["example"],
+      }),
+    });
+    const token = ((await created.json()) as { token: string }).token;
+
+    const response = await app.request("/v1/credentials/example", {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({ errorCode: "credential_export_not_supported" });
+  });
+
   it("enforces stored token connection scope on HTTP actions, proxies, and runtime discovery", async () => {
     const runtimeTokens = new RuntimeTokenService(new MemoryRuntimeTokenStore());
     const app = createTestServer([{ ...apiKeyProvider, actions: [echoAction] }], {

@@ -381,6 +381,39 @@ describe("ActionPolicyService", () => {
   });
 });
 
+describe("Credential export policy", () => {
+  const rules = { allowedActions: [], blockedActions: [], allowedProxies: [], blockedProxies: [] };
+
+  it("denies every export for a token without the grant", () => {
+    const snapshot = new ActionPolicyService().createSnapshot(rules, { ...rules, allowedProxies: ["*"] });
+    expect(snapshot.evaluateCredentialExport("openai_compatible")).toMatchObject({
+      allowed: false,
+      code: "credential_export_not_allowed",
+    });
+  });
+
+  it("grants only the named services and supports a wildcard", () => {
+    const named = new ActionPolicyService().createSnapshot(rules, {
+      ...rules,
+      allowedCredentialExports: ["openai_compatible"],
+    });
+    expect(named.evaluateCredentialExport("openai_compatible").allowed).toBe(true);
+    expect(named.evaluateCredentialExport("openai_video").allowed).toBe(false);
+
+    const wildcard = new ActionPolicyService().createSnapshot(rules, { ...rules, allowedCredentialExports: ["*"] });
+    expect(wildcard.evaluateCredentialExport("openai_video").allowed).toBe(true);
+  });
+
+  it("does not widen a proxy grant into a credential export grant", () => {
+    const snapshot = new ActionPolicyService().createSnapshot(rules, {
+      ...rules,
+      allowedProxies: ["openai_compatible"],
+    });
+    expect(snapshot.evaluateProxy("openai_compatible").allowed).toBe(true);
+    expect(snapshot.evaluateCredentialExport("openai_compatible").allowed).toBe(false);
+  });
+});
+
 describe("Trigger policy", () => {
   const rules = { allowedActions: [], blockedActions: [], allowedProxies: [], blockedProxies: [] };
   it("grants Triggers independently and denies legacy tokens by default", () => {

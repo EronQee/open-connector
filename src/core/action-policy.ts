@@ -8,6 +8,7 @@ export type PolicyErrorCode =
   | "proxy_not_allowed"
   | "proxy_blocked"
   | "connection_not_allowed"
+  | "credential_export_not_allowed"
   | "trigger_not_allowed"
   | "trigger_blocked";
 
@@ -40,6 +41,13 @@ export interface TokenPolicy {
   blockedActions: string[];
   allowedProxies: string[];
   allowedConnections?: string[];
+  /**
+   * Provider services whose stored credential this token may read.
+   *
+   * This is deliberately separate from proxy grants: a proxy call keeps the credential server-side,
+   * while an export hands it to the caller.
+   */
+  allowedCredentialExports?: string[];
   allowedTriggers?: string[];
 }
 
@@ -82,6 +90,7 @@ export class ActionPolicySnapshot {
   private readonly proxyLayers: CompiledLayer[];
   private readonly tokenProxyRules?: CompiledRule[];
   private readonly tokenTriggerRules?: CompiledRule[];
+  private readonly tokenCredentialExportRules?: CompiledRule[];
   private readonly allowedConnections: readonly string[];
 
   constructor(deployment: PolicyRules, runtime: PolicyRules, token?: TokenPolicy, updatedAt?: string) {
@@ -102,6 +111,7 @@ export class ActionPolicySnapshot {
       this.layers.push(tokenLayer);
       this.tokenProxyRules = tokenLayer.allowedProxies;
       this.tokenTriggerRules = (token.allowedTriggers ?? []).map(compileActionRule);
+      this.tokenCredentialExportRules = (token.allowedCredentialExports ?? []).map(compileProxyRule);
     }
   }
 
@@ -243,6 +253,27 @@ export class ActionPolicySnapshot {
         : "The selected connection is not granted to this runtime token.",
       checks: [{ source: "token", outcome: "allow_miss" }],
     };
+  }
+
+  /**
+   * Decide whether a runtime token may read one provider's stored credential.
+   *
+   * Absent token grants deny every provider, so an older token cannot export a credential just by
+   * authenticating. Deployment and Runtime policy have no layer here: exporting is a token-level
+   * capability, not something an operator can widen for every caller at once.
+   */
+  evaluateCredentialExport(service: string): ActionPolicyDecision {
+    const allowed = this.tokenCredentialExportRules?.find((rule) => rule.matches(service));
+    if (!allowed) {
+      return {
+        allowed: false,
+        code: "credential_export_not_allowed",
+        message: `${service} credential export is not granted to this runtime token.`,
+        checks: [{ source: "token", outcome: "allow_miss" }],
+      };
+    }
+
+    return { allowed: true, checks: [{ source: "token", outcome: "allow_match", rule: allowed.pattern }] };
   }
 }
 

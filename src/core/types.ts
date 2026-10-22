@@ -269,6 +269,14 @@ export type ProviderDefinition = {
   authTypes: AuthType[];
   /** Full auth configuration used by connection and OAuth flows. */
   auth: ProviderAuthDefinition[];
+  /**
+   * Whether a runtime token may read this provider's stored credential for use outside the connector.
+   *
+   * Only providers whose credential is a plain API key plus base URL set this, so a caller can send
+   * authenticated requests itself instead of routing responses through the connector. An absent flag
+   * means the credential stays inside the runtime.
+   */
+  credentialExport?: boolean;
   /** Provider product homepage. */
   homepageUrl?: string;
   /** Optional linked icon URL; third-party brand rights remain with their owners. */

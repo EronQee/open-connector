@@ -31,6 +31,7 @@ describe("RuntimeTokenService", () => {
       blockedActions: ["github.delete_repository"],
       allowedProxies: ["github"],
       allowedConnections: ["example:work"],
+      allowedCredentialExports: [],
       createdAt: "2026-07-20T00:00:00.000Z",
     };
     const store: IRuntimeTokenStore = {
@@ -49,6 +50,7 @@ describe("RuntimeTokenService", () => {
       blockedActions: ["github.delete_repository"],
       allowedProxies: ["github"],
       allowedConnections: ["example:work"],
+      allowedCredentialExports: [],
     });
     expect(store.findByHash).toHaveBeenCalledWith(record.tokenHash);
     expect(store.list).not.toHaveBeenCalled();
@@ -65,6 +67,7 @@ describe("RuntimeTokenService", () => {
       blockedActions: [],
       allowedProxies: [],
       allowedConnections: [],
+      allowedCredentialExports: [],
       createdAt: "2026-07-20T00:00:00.000Z",
     };
     const store: IRuntimeTokenStore = {
@@ -86,6 +89,7 @@ describe("RuntimeTokenService", () => {
       blockedActions: [],
       allowedProxies: [],
       allowedConnections: [],
+      allowedCredentialExports: [],
     });
     expect(logger.warn).toHaveBeenCalledWith(
       { tokenId: "token-1", err: expect.any(Error) },
@@ -116,6 +120,7 @@ describe("RuntimeTokenService", () => {
         blockedActions: [],
         allowedProxies: ["slack"],
         allowedConnections: ["example:work"],
+        allowedCredentialExports: [],
       }),
     ).resolves.toMatchObject({ allowedConnections: ["example:work"] });
     await expect(service.resolveToken(created.token)).resolves.toMatchObject({
@@ -159,6 +164,7 @@ class MemoryRuntimeTokenStore implements IRuntimeTokenStore {
       ...token,
       ...policy,
       allowedConnections: policy.allowedConnections ?? [],
+      allowedCredentialExports: policy.allowedCredentialExports ?? token.allowedCredentialExports ?? [],
     };
     this.tokens.set(id, updated);
     return updated;

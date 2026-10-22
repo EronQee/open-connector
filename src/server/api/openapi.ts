@@ -375,6 +375,7 @@ export function createOpenApiDocument(
     "/api/files/{fileId}": createTransitFilePath(),
     "/v1/actions/{actionId}": runPath,
     "/v1/proxy/{service}": createProxyPath(),
+    "/v1/credentials/{service}": createCredentialExportPath(),
     "/v1/providers/{service}/trigger-permissions": runtimeGetOperation(
       "Triggers",
       "Read provider-native Trigger permission guidance.",
@@ -729,6 +730,9 @@ export function createOpenApiDocument(
             allowedConnections: connectionIdArraySchema(
               "Stable connection IDs granted to this stored runtime token. An empty list is unrestricted connection access. IDs are opaque values returned by the connection APIs. Virtual no_auth connections do not require grants.",
             ),
+            allowedCredentialExports: policyRuleArraySchema(
+              "Provider services whose stored credential this token may read through GET /v1/credentials/:service. An empty list denies every export.",
+            ),
             createdAt: jsonSchema.string({ description: "Creation timestamp." }),
             lastUsedAt: jsonSchema.string({ description: "Last successful use timestamp." }),
           },
@@ -740,6 +744,7 @@ export function createOpenApiDocument(
               "blockedActions",
               "allowedProxies",
               "allowedConnections",
+              "allowedCredentialExports",
               "allowedTriggers",
               "createdAt",
             ],
@@ -760,6 +765,9 @@ export function createOpenApiDocument(
             allowedConnections: connectionIdArraySchema(
               "Optional stable connection IDs granted to the new token. Omit or leave empty for unrestricted connection access. A non-empty list matches exact opaque IDs returned by the connection APIs. Virtual no_auth connections do not require grants.",
             ),
+            allowedCredentialExports: policyRuleArraySchema(
+              "Optional provider services this token may export credentials from. Omit or leave empty to deny every export.",
+            ),
           },
           {
             required: ["name"],
@@ -779,9 +787,18 @@ export function createOpenApiDocument(
             allowedConnections: connectionIdArraySchema(
               "Stable connection IDs granted to this stored token. An empty list is unrestricted connection access. A non-empty list matches exact opaque IDs returned by the connection APIs. Virtual no_auth connections do not require grants.",
             ),
+            allowedCredentialExports: policyRuleArraySchema(
+              "Provider services whose stored credential this token may read. An empty list denies every export.",
+            ),
           },
           {
-            required: ["allowedActions", "blockedActions", "allowedProxies", "allowedConnections"],
+            required: [
+              "allowedActions",
+              "blockedActions",
+              "allowedProxies",
+              "allowedConnections",
+              "allowedCredentialExports",
+            ],
             description:
               "Complete replacement of one stored runtime token's Action, Trigger, proxy, and connection permissions.",
           },
@@ -820,6 +837,7 @@ export function createOpenApiDocument(
                 "proxy_not_allowed",
                 "proxy_blocked",
                 "connection_not_allowed",
+                "credential_export_not_allowed",
               ],
             },
             message: jsonSchema.string({ description: "Policy denial message." }),
@@ -1358,6 +1376,53 @@ function createProxyPath(): Record<string, unknown> {
         502: jsonResponse(runtimeFailureSchema()),
         503: jsonResponse(runtimeFailureSchema()),
         504: jsonResponse(runtimeFailureSchema()),
+      },
+    },
+  };
+}
+
+function createCredentialExportPath(): Record<string, unknown> {
+  return {
+    get: {
+      tags: ["Connections"],
+      summary: "Read one provider credential for direct use by a trusted local caller.",
+      description:
+        "Opt-in per provider and per runtime token. The connector returns the stored credential values and no request or response content, so generated media never passes through it. Only providers that declare credentialExport and connections with api_key or custom_credential auth are eligible; OAuth and SaaS credentials are refused. Send the result only to a caller you trust to hold it.",
+      parameters: [
+        {
+          name: "service",
+          in: "path",
+          required: true,
+          schema: jsonSchema.string({ description: "Provider service identifier." }),
+        },
+        ...namedConnectionParameters,
+      ],
+      responses: {
+        200: jsonResponse(
+          runtimeSuccessSchema(
+            jsonSchema.object(
+              {
+                service: jsonSchema.string({ description: "Provider service identifier." }),
+                connectionName: jsonSchema.string({ description: "Credential connection alias." }),
+                connectionId: jsonSchema.string({ description: "Stable connection identifier." }),
+                authType: jsonSchema.string({ description: "Credential auth type, api_key or custom_credential." }),
+                values: {
+                  type: "object",
+                  additionalProperties: { type: "string" },
+                  description: "Stored credential fields keyed by provider credential field id.",
+                },
+              },
+              {
+                required: ["service", "connectionName", "authType", "values"],
+                description: "Exported provider credential.",
+              },
+            ),
+          ),
+        ),
+        400: jsonResponse(runtimeFailureSchema()),
+        403: jsonResponse(runtimeFailureSchema()),
+        404: jsonResponse(runtimeFailureSchema()),
+        500: jsonResponse(runtimeFailureSchema()),
       },
     },
   };

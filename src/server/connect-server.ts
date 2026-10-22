@@ -46,7 +46,13 @@ import {
 } from "./actions/action-idempotency.ts";
 import { ActionRunner } from "./actions/action-runner.ts";
 import { renderActionMarkdown } from "./api/action-markdown.ts";
-import { clearLocalAuthCookie, createLocalAuthMiddleware, readLocalAuthSession, readRuntimeGrant } from "./api/auth.ts";
+import {
+  clearLocalAuthCookie,
+  createLocalAuthMiddleware,
+  hasAdminBearer,
+  readLocalAuthSession,
+  readRuntimeGrant,
+} from "./api/auth.ts";
 import { getResponseCachePolicy } from "./api/cache-policy.ts";
 import { createConnectionRoutes } from "./api/connection-routes.ts";
 import { HttpRequestError, internalError, jsonError, notFound, readJsonBody } from "./api/http-utils.ts";
@@ -247,6 +253,9 @@ export class ConnectServer {
       this.listRuntimeAppsByService(context, context.req.param("service")),
     );
     app.post("/v1/proxy/:service", (context) => this.createRuntimeProxyRequest(context, context.req.param("service")));
+    app.get("/v1/credentials/:service", (context) =>
+      this.exportRuntimeCredential(context, context.req.param("service")),
+    );
 
     app.get("/openapi.json", async (context) => {
       const { createOpenApiDocument } = await import("./api/openapi.ts");
@@ -929,6 +938,83 @@ export class ConnectServer {
           errorCode: error.code,
           message: error.message,
           meta: { actionId },
+        });
+      }
+
+      throw error;
+    }
+  }
+
+  /**
+   * Give a runtime token one provider's stored credential so the caller can send its own requests.
+   *
+   * This is the opposite trade-off from `/v1/proxy`: the proxy keeps the credential server-side and
+   * carries response bytes through the connector, while this endpoint carries no request or media
+   * data at all. It is therefore gated twice, by an explicit per-token export grant and by the
+   * provider's own `credentialExport` opt-in, and it never serves OAuth or SaaS credentials.
+   */
+  private async exportRuntimeCredential(context: Context, service: string): Promise<Response> {
+    const provider = this.options.catalog.providers.find((provider) => provider.service === service);
+    if (!provider) return writeRuntimeFailure(context, unknownServiceFailure(service));
+    if (provider.credentialExport !== true)
+      return writeRuntimeFailure(context, {
+        status: 403,
+        errorCode: "credential_export_not_supported",
+        message: `${service} does not allow credential export.`,
+        meta: { service },
+      });
+
+    let policy: ActionPolicySnapshot;
+    try {
+      policy = await this.getPolicySnapshot(context);
+    } catch {
+      return writeRuntimeFailure(context, {
+        status: 500,
+        errorCode: "internal_error",
+        message: "Runtime policy is unavailable.",
+        meta: { service },
+      });
+    }
+
+    const exportPolicy = policy.evaluateCredentialExport(service);
+    if (!exportPolicy.allowed && !hasAdminBearer(context)) {
+      return writeRuntimeFailure(context, {
+        status: 403,
+        errorCode: exportPolicy.code,
+        message: exportPolicy.message,
+        meta: { service, checks: exportPolicy.checks },
+      });
+    }
+
+    const connectionName = readConnectionName(context);
+    const connectionId = optionalString(context.req.header("x-oo-connector-app-id"));
+    try {
+      const summary = await this.options.connections.getConnectionSummary(service, connectionName, connectionId);
+      const connectionPolicy = summary?.authType === "no_auth" ? undefined : policy.evaluateConnection(summary?.id);
+      if (connectionPolicy && !connectionPolicy.allowed) {
+        return writeRuntimeFailure(context, {
+          status: 403,
+          errorCode: connectionPolicy.code,
+          message: connectionPolicy.message,
+          meta: { service, checks: connectionPolicy.checks },
+        });
+      }
+
+      const credential = await this.options.connections.getExportableCredential(service, connectionName, connectionId);
+      return writeRuntimeSuccess(context, {
+        service,
+        connectionName: summary?.connectionName ?? defaultConnectionName,
+        connectionId: summary?.id,
+        authType: credential.authType,
+        values: credential.values,
+      });
+    } catch (error) {
+      if (error instanceof ConnectionError) {
+        return writeRuntimeFailure(context, {
+          status: mapConnectionErrorStatus(error),
+          errorCode: error.code,
+          message: error.message,
+          meta: { service },
         });
       }
 
