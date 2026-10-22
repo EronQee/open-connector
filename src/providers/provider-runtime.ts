@@ -1131,10 +1131,22 @@ export function withRetryAfterSeconds(response: Response, details?: unknown): un
 
 /**
  * Read a JSON provider response or raise a structured provider request error.
+ *
+ * Pass `maxBytes` when the caller cannot bound the response shape itself, so an
+ * oversized provider body fails as 413 while the body is still being read
+ * instead of buffering without a limit. Without it the body is read as sent,
+ * which is the existing contract for providers with a known response shape.
  */
-export async function readProviderJson<T>(response: Response, source: string): Promise<T> {
+export async function readProviderJson<T>(response: Response, source: string, maxBytes?: number): Promise<T> {
   if (response.ok) {
-    return response.json() as Promise<T>;
+    if (maxBytes === undefined) {
+      return response.json() as Promise<T>;
+    }
+    const text = await readProviderTextBody(response, `${source} response`, maxBytes);
+    return parseProviderJsonBodyText(text, {
+      emptyBody: null,
+      invalidJsonMessage: `${source} returned invalid JSON`,
+    }) as T;
   }
 
   const text = await readProviderErrorTextBody(response, `${source} error response`);

@@ -7,16 +7,25 @@ This clone is a working copy of the fork `EronQee/open-connector`, branch `relay
 
 Relay quirks the two providers normalize instead of exposing to callers:
 
-| Concern | Behavior |
-|---|---|
-| Async image | `submit_image_task` posts `images/generations/async` (override with `submitPath`) and `get_image_task` probes `tasks`, `images/tasks`, then `images/generations` for the task record (override with `queryPath`). |
-| Video task record | `get_video` probes the protocol path, the other protocol path, then `tasks` (override with `queryPath`). |
-| Image edits | `edit_image` sends multipart first, the documented OpenAI shape; a 404/405/415 or a body that names multipart falls back to a JSON body with inline base64 images. |
-| Task state | Both provider families normalize status words (10+ per state) and also treat "images/video URL present, no failing status" as completed, because relays answer failures with HTTP 200 and some omit the status entirely. |
-| Image response shape | `{data:[{url}]}`, `{data:{result:{images}}}`, Gemini `candidates[].content.parts[].inlineData`, Markdown data URLs, and `image_generation_call` items all normalize into `images[]`. |
-| Unmodeled fields | `create_image`, `edit_image`, and `submit_image_task` take `extraBody`, merged into the request body verbatim — same semantics as the video provider. |
+| Concern              | Behavior                                                                                                                                                                                                                 |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Async image          | `submit_image_task` posts `images/generations/async` (override with `submitPath`) and `get_image_task` probes `tasks`, `images/tasks`, then `images/generations` for the task record (override with `queryPath`).        |
+| Video task record    | `get_video` probes the protocol path, the other protocol path, then `tasks` (override with `queryPath`).                                                                                                                 |
+| Image edits          | `edit_image` sends multipart first, the documented OpenAI shape; a 404/405/415 or a body that names multipart falls back to a JSON body with inline base64 images.                                                       |
+| Task state           | Both provider families normalize status words (10+ per state) and also treat "images/video URL present, no failing status" as completed, because relays answer failures with HTTP 200 and some omit the status entirely. |
+| Image response shape | `{data:[{url}]}`, `{data:{result:{images}}}`, Gemini `candidates[].content.parts[].inlineData`, Markdown data URLs, and `image_generation_call` items all normalize into `images[]`.                                     |
+| Duplicate fields     | When one relay record carries both a fetchable `url` and inline base64 for the same image, the URL wins and the base64 copy is dropped; two separate records that share a value are both kept.                           |
+| Response size        | Relay answers are read under a 20 MiB cap and fail as `413` instead of buffering without a bound.                                                                                                                        |
+| Unmodeled fields     | `create_image`, `edit_image`, and `submit_image_task` take `extraBody`, merged into the request body verbatim — same semantics as the video provider.                                                                    |
 
 Video bytes do NOT flow through the gateway by default: `get_video` returns the relay's `videoUrl` and the caller downloads the file to its own storage. The opt-in `download: true` input transfers the file into the connector's transit-file storage, only for relays whose download URL requires the API key or expires quickly.
+
+Known gaps, tracked in issue #1 ("Media actions buffer provider bytes through the connector"):
+
+- `Idempotency-Key` persists the whole Action response, inline image base64 included, for 24 hours (plaintext unless `OOMOL_CONNECT_ENCRYPTION_KEY` is set). Do not send it on these media Actions.
+- `edit_image` downloads reference images into connector memory to build the multipart body, because the documented OpenAI edits contract is multipart.
+- `get_video` with `download: true` stores the file in transit-file storage, which is served from the connector origin on an unauthenticated path until its TTL cleanup runs.
+- A relay that only returns `b64_json` leaves the connector as the only holder of those bytes; there is no URL to hand back to the caller.
 
 ## Deploy chain (every provider change)
 

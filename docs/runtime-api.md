@@ -358,6 +358,12 @@ Idempotency provides durable duplicate suppression and response replay, but it d
 exactly-once execution by the provider. This behavior applies to the HTTP Action endpoint; MCP
 `execute_action` calls do not accept an idempotency key.
 
+Replay stores the complete Action response body, so a media Action whose provider answer carries
+inline bytes persists those bytes for 24 hours. Avoid `Idempotency-Key` on media Actions
+(`create_image`, `edit_image`, `submit_image_task`, `get_image_task`, video generation and
+`get_video`) unless that retention is intended; see [credentials.md](credentials.md#encryption) for
+the storage and encryption implications.
+
 ## Action Guides
 
 Each Action has a local markdown guide that includes the input schema, scopes, provider

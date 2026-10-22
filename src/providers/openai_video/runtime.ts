@@ -6,6 +6,7 @@ import { assertPublicHttpUrl, encodePathSegment, readBoundedResponseBytes } from
 import { normalizeOpenAiCompatibleBaseUrl } from "../openai_compatible/runtime.ts";
 import {
   ProviderRequestError,
+  defaultProviderJsonMaxResponseBytes,
   providerFetch,
   providerUserAgent,
   readProviderErrorTextBody,
@@ -510,7 +511,11 @@ async function requestOpenAiVideoJson(input: {
       body: input.body === undefined ? undefined : JSON.stringify(input.body),
       signal,
     });
-    const parsed: unknown = await readProviderJson(response, "OpenAI-compatible video API");
+    const parsed: unknown = await readProviderJson(
+      response,
+      "OpenAI-compatible video API",
+      defaultProviderJsonMaxResponseBytes,
+    );
     return requiredResponseRecord(parsed, "OpenAI-compatible video API response");
   });
 }

@@ -100,6 +100,49 @@ describe("create_image", () => {
 
     expect(JSON.parse(String(calls[0]?.init.body))).toMatchObject({ resolution: "2k", official_fallback: false });
   });
+
+  it("returns one entry per record when a relay sends url and b64_json together", async () => {
+    const context = createContext(() =>
+      json({ data: [{ url: "https://cdn.example.com/a.png", b64_json: "QUJD", revised_prompt: "a cat" }] }),
+    );
+
+    const result = (await openAiCompatibleActionHandlers.create_image({ model: "m", prompt: "p" }, context)) as {
+      images: Array<{ url: string | null; b64Json: string | null; revisedPrompt: string | null }>;
+    };
+
+    expect(result.images).toEqual([{ url: "https://cdn.example.com/a.png", b64Json: null, revisedPrompt: "a cat" }]);
+  });
+
+  it("keeps distinct records that happen to carry the same value", async () => {
+    const context = createContext(() =>
+      json({
+        data: [{ url: "https://cdn.example.com/same.png" }, { url: "https://cdn.example.com/same.png" }],
+      }),
+    );
+
+    const result = (await openAiCompatibleActionHandlers.create_image({ model: "m", prompt: "p" }, context)) as {
+      images: Array<{ url: string | null }>;
+    };
+
+    expect(result.images.map((image) => image.url)).toEqual([
+      "https://cdn.example.com/same.png",
+      "https://cdn.example.com/same.png",
+    ]);
+  });
+
+  it("returns 413 when the relay answer exceeds the response cap", async () => {
+    const context = createContext(
+      () =>
+        new Response("{}", {
+          status: 200,
+          headers: { "content-length": String(20 * 1024 * 1024 + 1) },
+        }),
+    );
+
+    await expect(
+      openAiCompatibleActionHandlers.create_image({ model: "m", prompt: "p" }, context),
+    ).rejects.toMatchObject({ status: 413 });
+  });
 });
 
 describe("edit_image", () => {

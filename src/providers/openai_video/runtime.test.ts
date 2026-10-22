@@ -90,6 +90,18 @@ describe("get_video", () => {
 
     expect(result.state).toBe("failed");
   });
+
+  it("returns 413 when the task record exceeds the response cap", async () => {
+    const context = createContext(
+      () =>
+        new Response("{}", {
+          status: 200,
+          headers: { "content-length": String(20 * 1024 * 1024 + 1) },
+        }),
+    );
+
+    await expect(openAiVideoActionHandlers.get_video({ taskId: "t1" }, context)).rejects.toMatchObject({ status: 413 });
+  });
 });
 
 describe("create_video", () => {

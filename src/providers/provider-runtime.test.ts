@@ -91,6 +91,16 @@ describe("readProviderJson", () => {
       message: "provider request failed",
     });
   });
+
+  it("enforces an explicit byte cap on a successful body", async () => {
+    await expect(
+      readProviderJson(new Response('{"data":"x"}', { headers: { "content-length": "4096" } }), "provider", 64),
+    ).rejects.toMatchObject({ status: 413 });
+  });
+
+  it("reads a successful body under the cap", async () => {
+    await expect(readProviderJson(new Response('{"ok":true}'), "provider", 64)).resolves.toEqual({ ok: true });
+  });
 });
 
 describe("defineProviderExecutors", () => {

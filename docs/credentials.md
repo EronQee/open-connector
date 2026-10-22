@@ -52,6 +52,12 @@ Completed idempotent Action responses remain eligible for replay for 24 hours. E
 records are deleted opportunistically when a later idempotent Action request claims a key; the
 24-hour replay window is not a guarantee of physical deletion by that deadline.
 
+Because the stored payload is the whole Action response, it also holds provider data that was
+returned inline — generated image `b64Json`, for example. Do not send `Idempotency-Key` on media
+Actions (`create_image`, `edit_image`, `submit_image_task`, `get_image_task`, video generation and
+`get_video`) unless that retention is acceptable: the response is persisted, and without
+`OOMOL_CONNECT_ENCRYPTION_KEY` it is persisted as plaintext.
+
 ## Credential Fields
 
 Credential fields are declared by each provider's catalog `auth` metadata. The runtime treats that

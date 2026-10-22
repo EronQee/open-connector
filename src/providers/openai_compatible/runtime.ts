@@ -18,6 +18,7 @@ import {
 } from "../../core/request.ts";
 import {
   ProviderRequestError,
+  defaultProviderJsonMaxResponseBytes,
   providerFetch,
   providerUserAgent,
   readProviderErrorTextBody,
@@ -593,25 +594,13 @@ const imageBase64Keys = ["b64_json", "base64", "image_base64", "imageBase64"];
  */
 function collectImageItems(payload: Record<string, unknown>): NormalizedImageItem[] {
   const found: NormalizedImageItem[] = [];
-  const seen = new Set<string>();
-
-  const add = (item: NormalizedImageItem) => {
-    const key = item.url ?? item.b64Json;
-    if (!key || seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    found.push(item);
-  };
 
   const visit = (value: unknown, depth = 0): void => {
     if (depth > 8 || value === null || value === undefined) {
       return;
     }
     if (typeof value === "string") {
-      for (const item of imagesInText(value)) {
-        add(item);
-      }
+      found.push(...imagesInText(value));
       return;
     }
     if (Array.isArray(value)) {
@@ -625,6 +614,22 @@ function collectImageItems(payload: Record<string, unknown>): NormalizedImageIte
       return;
     }
 
+    // Dedupe inside one relay record only: a record that repeats its own
+    // payload (a url field plus the same value under a base64 key, or the same
+    // data URL in two fields) is one image, while two records that happen to
+    // carry an identical value are two outputs and must both survive.
+    const seen = new Set<string>();
+    const add = (item: NormalizedImageItem) => {
+      const key = item.url ?? item.b64Json;
+      if (!key || seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      found.push(item);
+    };
+
+    const revisedPrompt = optionalString(record.revised_prompt) ?? optionalString(record.revisedPrompt) ?? null;
+
     if (record.type === "image_generation_call") {
       const result = optionalString(record.result);
       if (result) {
@@ -636,22 +641,20 @@ function collectImageItems(payload: Record<string, unknown>): NormalizedImageIte
       }
     }
 
-    // Gemini-native parts carry the bytes under inlineData/inline_data, which
-    // is not one of the container keys below.
-    const inline = optionalRecord(record.inlineData) ?? optionalRecord(record.inline_data);
-    const inlineData = optionalString(inline?.data);
-    if (inlineData) {
-      add({ url: null, b64Json: inlineData, revisedPrompt: null });
-    }
-
-    const revisedPrompt = optionalString(record.revised_prompt) ?? optionalString(record.revisedPrompt) ?? null;
+    // Pass 1: caller-fetchable URLs. A record that offers one is answered with
+    // the URL, so the inline base64 copy of the same image is not transferred.
+    let hasUrl = false;
     for (const key of imageUrlKeys) {
       const candidate = record[key];
       if (typeof candidate === "string" && candidate) {
         if (looksLikeHttpUrl(candidate) || candidate.startsWith("/")) {
+          hasUrl = true;
           add({ url: candidate, b64Json: null, revisedPrompt });
         } else {
           for (const item of imagesInText(candidate)) {
+            if (item.url) {
+              hasUrl = true;
+            }
             add(item);
           }
         }
@@ -659,23 +662,37 @@ function collectImageItems(payload: Record<string, unknown>): NormalizedImageIte
         visit(candidate, depth + 1);
       }
     }
-    for (const key of imageBase64Keys) {
-      const candidate = optionalString(record[key]);
-      if (candidate) {
-        add({ url: null, b64Json: candidate, revisedPrompt });
-      }
-    }
-    for (const key of imageContainerKeys) {
-      if (record[key] !== undefined) {
-        visit(record[key], depth + 1);
-      }
-    }
     // A content part keeps its payload in `text`, including the data URL some
     // relays paste into their answer instead of returning image bytes.
     const partText = optionalString(record.text);
     if (partText) {
       for (const item of imagesInText(partText)) {
+        if (item.url) {
+          hasUrl = true;
+        }
         add(item);
+      }
+    }
+
+    if (!hasUrl) {
+      // Gemini-native parts carry the bytes under inlineData/inline_data, which
+      // is not one of the container keys below.
+      const inline = optionalRecord(record.inlineData) ?? optionalRecord(record.inline_data);
+      const inlineData = optionalString(inline?.data);
+      if (inlineData) {
+        add({ url: null, b64Json: inlineData, revisedPrompt: null });
+      }
+      for (const key of imageBase64Keys) {
+        const candidate = optionalString(record[key]);
+        if (candidate) {
+          add({ url: null, b64Json: candidate, revisedPrompt });
+        }
+      }
+    }
+
+    for (const key of imageContainerKeys) {
+      if (record[key] !== undefined) {
+        visit(record[key], depth + 1);
       }
     }
   };
@@ -888,6 +905,16 @@ function readModelIds(payload: Record<string, unknown>): string[] {
   return readModelRecords(payload).map((model) => model.id);
 }
 
+/**
+ * Read one relay answer under the shared JSON response cap. Image answers carry
+ * either a URL or inline base64, so the cap bounds the body the connector can
+ * be made to buffer; an oversized answer fails as 413 instead of growing.
+ */
+async function readOpenAiCompatibleResponseRecord(response: Response): Promise<Record<string, unknown>> {
+  const parsed: unknown = await readProviderJson(response, imageApiLabel, defaultProviderJsonMaxResponseBytes);
+  return requiredResponseRecord(parsed, `${imageApiLabel} response`);
+}
+
 async function requestOpenAiCompatibleJson(input: OpenAiCompatibleJsonRequest): Promise<Record<string, unknown>> {
   try {
     return await runProviderRequest(
@@ -900,16 +927,14 @@ async function requestOpenAiCompatibleJson(input: OpenAiCompatibleJsonRequest): 
         const url = new URL(input.path, input.context.baseUrl).toString();
         const response = await sendOpenAiCompatibleRequest(input, url, input.body, signal);
         if (response.ok) {
-          const parsed: unknown = await readProviderJson(response, imageApiLabel);
-          return requiredResponseRecord(parsed, `${imageApiLabel} response`);
+          return readOpenAiCompatibleResponseRecord(response);
         }
         const text = await readProviderErrorTextBody(response, `${imageApiLabel} error response`);
         if (input.fallbackBody === undefined || !isFormRejection(response.status, text)) {
           throw new ProviderRequestError(response.status, text || `${imageApiLabel} request failed`);
         }
         const retry = await sendOpenAiCompatibleRequest(input, url, input.fallbackBody, signal);
-        const parsed: unknown = await readProviderJson(retry, imageApiLabel);
-        return requiredResponseRecord(parsed, `${imageApiLabel} response`);
+        return readOpenAiCompatibleResponseRecord(retry);
       },
     );
   } catch (error) {
