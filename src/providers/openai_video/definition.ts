@@ -14,6 +14,12 @@ export const provider: ProviderDefinition = {
   displayName: "OpenAI-Compatible Video Relay",
   categories: ["AI"],
   authTypes: ["custom_credential"],
+  /**
+   * The credential is a base URL, an API key and a task protocol for an OpenAI-compatible video
+   * relay, so a local agent can submit tasks, poll them and download the result itself. The exported
+   * `protocol` is what selects the task route; when it is absent the relay uses `openai`.
+   */
+  credentialExport: true,
   auth: [
     {
       type: "custom_credential",
